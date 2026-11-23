@@ -872,15 +872,9 @@ button.b.lite:hover{background:var(--pri);border-color:var(--pri);color:#fff}
     </div>
     <h3>Cálculo do custo anual</h3>
     <div class="grid">
-      <label class="f">Método
-        <select id="s-met">
-          <option value="fator">Fator da planilha (custo mensal × fator)</option>
-          <option value="calc">Calculado (meses + 13º + 1/3 férias)</option>
-        </select>
-      </label>
       <label class="f">Fator anual<input id="s-fat" type="number" step="0.000001"></label>
     </div>
-    <p class="hint">“Fator da planilha” reproduz a planilha atual: custo anual = custo mensal × fator; alimentação e transporte × meses; encargos × (meses + 1); remuneração = diferença. “Calculado”: remuneração × (meses + 13º + 1/3 de férias proporcionais), encargos = % patronal sobre isso, alimentação e transporte × meses.</p>
+    <p class="hint">Igual à planilha modelo: custo anual = custo mensal × fator; alimentação e transporte × meses; encargos × (meses + 1); remuneração = diferença.</p>
     <h3>Assinatura</h3>
     <div class="grid">
       <label class="f">Nome<input id="s-sn"></label>
@@ -1027,6 +1021,7 @@ function migrateSettings(s){
     });
     s.v=3;
   }
+  s.metodo="fator";
   return s;
 }
 function blankImpacto(){
@@ -1138,15 +1133,10 @@ function calcular(imp){
   }
   out.aliUnit=+p.alimentacao||0; out.ali=out.aliUnit*out.qtd;
   out.mensal = out.K + out.M + out.ali;
-  if(p.metodo==="calc"){
-    const f = P + P/12 + P/36;
-    out.aRem = out.rem*f; out.aEnc = out.aRem*(+p.patronal||0)/100; out.aAli = out.ali*P; out.aTr = out.M*P;
-    out.anual = out.aRem+out.aEnc+out.aAli+out.aTr;
-  } else {
-    out.anual = out.mensal*(+p.fator||0);
-    out.aAli = out.ali*P; out.aTr = out.M*P; out.aEnc = out.enc*(P+1);
-    out.aRem = out.anual - out.aAli - out.aTr - out.aEnc;
-  }
+  // como na planilha modelo
+  out.anual = out.mensal*(+p.fator||0);
+  out.aAli = out.ali*P; out.aTr = out.M*P; out.aEnc = out.enc*(P+1);
+  out.aRem = out.anual - out.aAli - out.aTr - out.aEnc;
   return out;
 }
 
@@ -1284,7 +1274,7 @@ function renderSum(){
   const [cls,txt]=estadoImpacto(); const st=$("#estado"); if(st){ st.className="chip"+(cls?" "+cls:""); st.textContent=txt; }
   const P=+cur.periodo||12;
   $("#in-a").textContent=brl(r.anual); $("#in-m").textContent=brl(r.mensal); $("#in-q").textContent=r.qtd; $("#in-e").textContent=brl(r.enc);
-  $("#in-per").textContent = (cur.params&&cur.params.metodo==="calc") ? `(${P} meses, 13º e férias proporcionais)` : `(${P} meses, 13º e férias)`;
+  $("#in-per").textContent = `(${P} meses, 13º e férias)`;
   $("#btn-save").disabled = r.qtd===0;
   $("#sb-q").textContent=r.qtd; $("#sb-m").textContent=brl(r.mensal); $("#sb-a").textContent=brl(r.anual);
   if(!$("#v-relatorio").classList.contains("hidden")) renderReport();
@@ -1426,19 +1416,18 @@ function buildGrid(imp){
   put(x,"D",63,"VALOR MENSAL"); put(x,"E",63,`DESPESA TOTAL (${P}M+13º+FÉRIAS)`);
   const sp=(col)=> lineRows.length ? lineRows.map(o=>`(${col}${o.n}*C${o.n})`).join("+") : "0";
   const R24=H+1, R25=H+2, R26=H+3, R27=H+4, R28=H+5;
-  const calc = p.metodo==="calc";
   x=row(16.5); put(x,"B",45,"Remuneração - 319004"); put(x,"C",45,null); merge("B"+R24,"C"+R24);
   put(x,"D",46,r.rem,sp(K.rem));
-  put(x,"E",46,r.aRem, calc ? `D${R24}*(${P}+${P}/12+${P}/36)` : `${R4}${R25}-SUM(E${R25}:E${R27})`);
+  put(x,"E",46,r.aRem, `${R4}${R25}-SUM(E${R25}:E${R27})`);
   put(x,R2,36,"CUSTO TOTAL MENSAL"); put(x,R3,37,null); merge(R2+R24,R3+R24); put(x,R4,20,r.mensal,`SUM(${K.custo}${TG},${K.trTot}${TG},${R4}${N3})`);
   x=row(16.5); put(x,"B",34,"Auxílio Alimentação - 339046"); put(x,"C",34,null); merge("B"+R25,"C"+R25);
   put(x,"D",19,r.ali,`${R4}${N3}`); put(x,"E",19,r.aAli,`D${R25}*${P}`);
   put(x,R2,38,"CUSTO TOTAL ANUAL"); put(x,R3,39,null); merge(R2+R25,R3+R25);
-  put(x,R4,21,r.anual, calc ? `E${R28}` : `${R4}${R24}*${(+p.fator||0)}`);
+  put(x,R4,21,r.anual, `${R4}${R24}*${(+p.fator||0)}`);
   x=row(16.5); put(x,"B",45,"Auxílio Transporte - 339049"); put(x,"C",45,null); merge("B"+R26,"C"+R26);
   put(x,"D",46,r.M,`${K.trTot}${TG}`); put(x,"E",46,r.aTr,`D${R26}*${P}`);
   x=row(16.5); put(x,"B",34,"Encargos - 339047"); put(x,"C",34,null); merge("B"+R27,"C"+R27);
-  put(x,"D",19,r.enc,sp(K.enc)); put(x,"E",19,r.aEnc, calc ? `E${R24}*${PATs}` : `D${R27}*(${P}+1)`);
+  put(x,"D",19,r.enc,sp(K.enc)); put(x,"E",19,r.aEnc, `D${R27}*(${P}+1)`);
   x=row(16.5); put(x,"B",47,"TOTAL"); put(x,"C",47,null); merge("B"+R28,"C"+R28);
   put(x,"D",48,r.mensal,`SUM(D${R24}:D${R27})`); put(x,"E",48,r.anual,`SUM(E${R24}:E${R27})`);
   row(8.25);
@@ -1763,7 +1752,7 @@ function setPane(k){ tabPane=k;
   document.querySelectorAll(".pills [role=tab]").forEach(b=>{ const on=b.dataset.p===k; b.setAttribute("aria-selected",on); b.tabIndex=on?0:-1; });
   document.querySelectorAll("#v-tabelas .pane").forEach(p=>{ const on=p.id==="pn-"+k; p.hidden=!on; p.classList.toggle("on",on); }); }
 function renderSettings(){
-  const m={"#s-pat":"patronal","#s-ali":"alimentacao","#s-tar":"tarifa","#s-per":"periodo","#s-lei":"lei","#s-cid":"cidade","#s-met":"metodo","#s-fat":"fator","#s-sn":"signNome","#s-sc":"signCargo"};
+  const m={"#s-pat":"patronal","#s-ali":"alimentacao","#s-tar":"tarifa","#s-per":"periodo","#s-lei":"lei","#s-cid":"cidade","#s-fat":"fator","#s-sn":"signNome","#s-sc":"signCargo"};
   const NUM_S=new Set(["patronal","alimentacao","tarifa","periodo","fator"]);
   for(const sel in m){ const el=$(sel), k=m[sel]; el.value= NUM_S.has(k) ? fv(k,S[k]) : S[k];
     el.onchange=()=>{ S[k] = NUM_S.has(k) ? (num(el.value)??0) : el.value; if(NUM_S.has(k)) el.value=fv(k,S[k]); saveSettingsSoon(); syncParamsToDraft(); }; }
@@ -1824,7 +1813,6 @@ function diffTabelas(imp){
   const P=imp.params||{};
   [["patronal","% patronal"],["alimentacao","Aux.-alimentação"],["tarifa","Tarifa de transporte"],["fator","Fator anual"]].forEach(([k,nm])=>{
     if(Math.abs((+P[k]||0)-(+S[k]||0))>1e-9) add(`${nm}: ${fv(k,P[k])} → ${fv(k,S[k])}`); });
-  if((P.metodo||"")!==(S.metodo||"")) add("Método do custo anual");
   if((P.lei||"")!==(S.lei||"")) add(`Lei: ${P.lei||"-"} → ${S.lei||"-"}`);
   return out;
 }
