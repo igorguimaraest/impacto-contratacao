@@ -842,7 +842,7 @@ button.b.lite:hover{background:var(--pri);border-color:var(--pri);color:#fff}
       <button type="button" role="tab" id="pl-bkp" aria-controls="pn-bkp" aria-selected="false" tabindex="-1" data-p="bkp"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Backup</button>
     </div>
     <div class="pane on" id="pn-sal" role="tabpanel" aria-labelledby="pl-sal">
-      <div class="phead"><div><h2 class="ptitle">Salários por nível</h2><p class="psub">Todos os cargos de um nível usam estes valores. Atualize aqui a cada reajuste.</p></div><button class="b dan" id="btn-reset"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>Restaurar padrões</button></div>
+      <div class="phead"><div><h2 class="ptitle">Salários por nível</h2><p class="psub">Todos os cargos de um nível usam estes valores. Atualize aqui a cada reajuste.</p></div></div>
     
     <div style="overflow-x:auto">
     <table class="t" id="t-niv"><thead><tr><th>Nível</th><th>Vencimento R$</th><th>G.E. %</th><th>GRV %</th><th>GTI %</th><th>Abono R$</th><th>Aux. transp. R$</th></tr></thead><tbody></tbody></table>
@@ -1884,7 +1884,6 @@ $("#btn-addcg").onclick=async()=>{
   S.cargos.push({id:uid(),nome,nivel:nv,excecao:false,venc:null,ge:null,grv:null,gti:null,abono:null,transp:null});
   saveSettingsSoon(); renderSettings(); renderLevels(); toast("Cargo adicionado em "+NIVEL_NOME[nv]);
 };
-$("#btn-reset").onclick=async()=>{ if(await ask("Restaurar padrões?","<p class='hint'>Tabelas, encargos e lista de cargos voltam aos valores da Lei 11.358/2026. Impactos salvos não são alterados.</p>","Restaurar")){ S=defaultSettings(); await saveSettings(); renderSettings(); refreshDraftFromTables(); toast("Tabelas restauradas"); } };
 $("#btn-pdf").onclick=gerarPDF;
 $("#btn-print").onclick=imprimir;
 $("#z-in").onclick=()=>zoomStep(0.1); $("#z-out").onclick=()=>zoomStep(-0.1); // menu do percentual: abre/fecha, teclado (setas, Esc) e clique fora
