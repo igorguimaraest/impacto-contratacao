@@ -421,11 +421,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
   --shadow:0 6px 24px rgba(15,58,115,.07); --ring:0 0 0 3px rgba(15,58,115,.15);
   --r-card:20px; --r-row:16px; --r-ctl:10px;
 }
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){ --bg:#0E131D; --card:#161D2B; --row:#1B2333; --ink:#E6EBF3; --muted:#9AA6BA; --line:#263044;
-    --pri:#2F64B6; --pri-h:#3A73CC; --title:#9CC0F5; --soft:#1F3150; --soft-ink:#BFD5F7; --sel:#1C2A42; --ok-bg:#12321F; --warn-bg:#3A2614; --danger-bg:#3A1A1E;
-    --shadow:0 6px 24px rgba(0,0,0,.35); --ring:0 0 0 3px rgba(122,165,235,.35); }
-}
+:root{color-scheme:light}
+:root[data-theme="dark"]{color-scheme:dark}
 :root[data-theme="dark"]{ --bg:#0E131D; --card:#161D2B; --row:#1B2333; --ink:#E6EBF3; --muted:#9AA6BA; --line:#263044;
   --pri:#2F64B6; --pri-h:#3A73CC; --title:#9CC0F5; --soft:#1F3150; --soft-ink:#BFD5F7; --sel:#1C2A42; --ok-bg:#12321F; --warn-bg:#3A2614; --danger-bg:#3A1A1E;
   --shadow:0 6px 24px rgba(0,0,0,.35); --ring:0 0 0 3px rgba(122,165,235,.35); }
@@ -470,7 +467,6 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--pri);box
 /* botões (Gerar = contorno, Exportar = cheio, Baixe aqui = suave) */
 button.b,label.b{display:inline-flex;align-items:center;justify-content:center;gap:8px;font:inherit;font-size:13.5px;font-weight:600;border:1.5px solid var(--pri);background:var(--card);color:var(--pri);border-radius:var(--r-ctl);padding:9px 16px;cursor:pointer;transition:background .15s,color .15s,border-color .15s;white-space:nowrap}
 :root[data-theme="dark"] button.b,:root[data-theme="dark"] label.b{color:var(--soft-ink);border-color:var(--pri)}
-@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) button.b,:root:not([data-theme="light"]) label.b{color:var(--soft-ink)} }
 button.b:hover,label.b:hover{background:var(--sel)}
 button.b.pri{background:var(--pri);border-color:var(--pri);color:#fff}
 button.b.pri:hover{background:var(--pri-h);border-color:var(--pri-h)}
@@ -560,7 +556,6 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none}
 .chip.neutral{background:var(--row);color:var(--muted)}
 .chip.neutral::before{background:var(--muted)}
 :root[data-theme="dark"] .chip.warn{color:#FFC48F}
-@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .chip.warn{color:#FFC48F} }
 .pghead .sync{font-size:11.5px;color:var(--muted)}
 
 /* nome do cargo como botão de expandir */
@@ -584,7 +579,6 @@ button.nm:focus-visible{outline:2px solid var(--pri);outline-offset:4px}
 .ind span em{font-style:normal;text-transform:none;letter-spacing:0}
 .ind svg.big{position:absolute;right:18px;top:50%;transform:translateY(-50%);width:46px;height:46px;color:#D3D9E2;stroke-width:1.6}
 :root[data-theme="dark"] .ind svg.big{color:#2E3A50}
-@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .ind svg.big{color:#2E3A50} }
 .pgacts{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 button.b.lnk{border-color:transparent;background:none}
 button.b.lnk:hover{background:var(--sel)}
@@ -712,7 +706,6 @@ button.b.lite:hover{background:var(--pri);border-color:var(--pri);color:#fff}
 .seg button:hover:not([aria-pressed="true"]){color:var(--title)}
 .prevwrap.desk{background:#DCE1E8;border-radius:var(--r-card);padding:32px 24px;overflow:auto;display:flex}
 :root[data-theme="dark"] .prevwrap.desk{background:#0B1019}
-@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .prevwrap.desk{background:#0B1019} }
 .sheet{background:#fff;box-shadow:0 2px 4px rgba(15,30,60,.08),0 18px 40px rgba(15,30,60,.18);margin:0 auto;flex:none;display:flex;align-items:flex-start;justify-content:center}
 .pagefoot{text-align:center;font-size:12px;color:var(--muted);margin:12px 0 0}
 @media (max-width:640px){ .prevwrap.desk{padding:14px 10px} .vhead{padding:14px} .tools .b{flex:1} .tools .sep{display:none} }
@@ -1103,6 +1096,10 @@ async function deleteImpacto(id){
   if(DB){ try{ await DB.collection("impactos").doc(id).delete(); }catch(e){} }
 }
 function saveDraft(){ LS.set("draft",cur); }
+// Tema claro/escuro: quem decide é o SIGP. Uso: IMPACTO_TEMA("escuro") ou IMPACTO_TEMA("claro").
+// Também aceita ?tema=escuro no endereço (útil quando o app roda num iframe dentro do SIGP).
+window.IMPACTO_TEMA = t => { const esc = /^(escuro|dark)$/i.test(String(t||"")); document.documentElement.setAttribute("data-theme", esc ? "dark" : "light"); };
+{ const t = new URLSearchParams(location.search).get("tema"); window.IMPACTO_TEMA(t || "claro"); }
 window.addEventListener("storage",e=>{
   if(e.key==="impcontr:impactos"){ IMP=LS.get("impactos")||{}; if(!$("#v-salvos").classList.contains("hidden")) renderList(); renderSum(); }
   if(e.key==="impcontr:settings"){ const s=LS.get("settings"); if(s){ S=migrateSettings(s); if(!$("#v-tabelas").classList.contains("hidden")) renderSettings(); refreshDraftFromTables(); } }
