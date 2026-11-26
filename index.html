@@ -1314,7 +1314,7 @@ function renderSum(){
   const [cls,txt]=estadoImpacto(); const st=$("#estado"); if(st){ st.className="chip"+(cls?" "+cls:""); st.textContent=txt; }
   const P=+cur.periodo||12;
   $("#in-a").textContent=brl(r.anualC); $("#in-m").textContent=brl(r.mensalC); $("#in-q").textContent=r.qtd; $("#in-e").textContent=brl(r.enc);
-  $("#in-per").textContent = `(${P} meses, 13º e férias${r.margemPct?", com margem de "+fmtPct(r.margemPct):""})`;
+  $("#in-per").textContent = `(${P} ${P===1?"mês":"meses"}, 13º e férias${r.margemPct?", com margem de "+fmtPct(r.margemPct):""})`;
   $("#btn-save").disabled = r.qtd===0;
   $("#sb-q").textContent=r.qtd; $("#sb-m").textContent=brl(r.mensalC); $("#sb-a").textContent=brl(r.anualC);
   if(!$("#v-relatorio").classList.contains("hidden")) renderReport();
@@ -1406,7 +1406,7 @@ function buildGrid(imp){
   x=row(15); put(x,"A",3,"INTERESSADO: "+(imp.interessado||"")); fill(x,"B",LAST,3);
   x=row(15); put(x,"A",3,"ASSUNTO: "+(imp.assunto||"")); fill(x,"B",LAST,3);
   row(8.25);
-  x=row(16.5); put(x,"A",27,`DEMONSTRATIVO DE CUSTO MENSAL ESTIMADO - PSS - ${P} MESES`);
+  x=row(16.5); put(x,"A",27,`DEMONSTRATIVO DE CUSTO MENSAL ESTIMADO - PSS - ${P} ${P===1?"MÊS":"MESES"}`);
   fill(x,"B",colL(last-1),28); put(x,LAST,29,null); merge("A5",LAST+"5");
   x=row(49.5);
   const head={org:"ÓRGÃO",cargo:"CARGO",qtd:"QTD",vc:"VCTO",ge:"G. E. "+pctLabel("ge"),grv:"GRV - "+pctLabel("grv"),gti:"GTI - "+pctLabel("gti"),gde:"GDE - "+pctLabel("gde"),ab:"ABONO",rem:"REMUNER.",enc:"ENCARGOS",tot:"TOTAL COM ENCARGOS",custo:"CUSTO TOTAL MENSAL (TOTAL C/ ENC. x QTD)",tr:"AUX. TRANSP.",trTot:"CUSTO TOTAL (AUX. TRANSP. X QTD.)"};
