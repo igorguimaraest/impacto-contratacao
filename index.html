@@ -582,7 +582,7 @@ button.nm:focus-visible{outline:2px solid var(--pri);outline-offset:4px}
 .pgacts{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 button.b.lnk{border-color:transparent;background:none}
 button.b.lnk:hover{background:var(--sel)}
-.g-proc{grid-template-columns:1.3fr 1fr 1fr .8fr 1fr}
+.g-proc{grid-template-columns:1.3fr 1fr 1fr .8fr .8fr 1fr}
 .sumbar.rs-visivel{opacity:0;pointer-events:none;transform:translate(-50%,12px)}
 .sumbar{transition:opacity .2s,transform .2s}
 @media (min-width:901px){ .sumbar{display:none} main{padding-bottom:40px} }
@@ -765,6 +765,7 @@ button.b.lite:hover{background:var(--pri);border-color:var(--pri);color:#fff}
       <label class="f">Interessado<input id="i-int"></label>
       <label class="f">Órgão<input id="i-org"></label>
       <label class="f">Período em meses<input id="i-per" type="number" min="1" max="60" inputmode="numeric"></label>
+      <label class="f">Margem de segurança (%)<input id="i-mar" inputmode="decimal" placeholder="0%"></label>
       <label class="f">Data do documento<input id="i-data" type="date"></label>
     </div>
     <div class="grid" style="margin-top:14px">
@@ -860,6 +861,7 @@ button.b.lite:hover{background:var(--pri);border-color:var(--pri);color:#fff}
       <label class="f">Auxílio-alimentação por servidor<input id="s-ali" inputmode="decimal"></label>
       <label class="f">Tarifa de transporte<input id="s-tar" inputmode="decimal"></label>
       <label class="f">Período padrão em meses<input id="s-per" type="number" min="1"></label>
+      <label class="f">Margem de segurança padrão (%)<input id="s-mar" inputmode="decimal"></label>
       <label class="f">Lei citada na nota 1<input id="s-lei"></label>
       <label class="f">Cidade da assinatura<input id="s-cid"></label>
     </div>
@@ -909,7 +911,7 @@ const num = v => { if(v===""||v==null) return null; if(typeof v==="number") retu
   else if(/^-?\d{1,3}(\.\d{3})+$/.test(s)) s=s.replace(/\./g,"");
   const n=Number(s); return isFinite(n)?n:null; };
 const MONEY_K = new Set(["venc","abono","transp","alimentacao","tarifa"]);
-const PCT_K = new Set(["ge","grv","gti","patronal"]);
+const PCT_K = new Set(["ge","grv","gti","patronal","margem"]);
 const fmtPct = v => (Number(v)||0).toLocaleString("pt-BR",{maximumFractionDigits:4})+"%";
 // valor formatado para exibir no campo
 const fv = (k,v) => (v==null||v==="") ? "" : MONEY_K.has(k) ? "R$ "+fmt(v) : PCT_K.has(k) ? fmtPct(v) : String(v);
@@ -956,7 +958,7 @@ const GTI_EXC = {venc:null, ge:null, grv:null, gti:70, abono:280, transp:null};
 function defaultSettings(){
   return {
     v:3,
-    patronal:22, alimentacao:1500, tarifa:4.60, periodo:12,
+    patronal:22, alimentacao:1500, tarifa:4.60, periodo:12, margem:0,
     lei:"LEI Nº 11.358/2026", cidade:"Belém",
     signNome:"WALDILSON COLINS", signCargo:"Diretor de Gestão de Pessoas",
     interessado:"SEAP", orgao:"SEAP",
@@ -1014,7 +1016,7 @@ function migrateSettings(s){
   return s;
 }
 function blankImpacto(){
-  return { id:null, pae:"", assunto:"", interessado:S.interessado, orgao:S.orgao, periodo:S.periodo, data:todayISO(), linhas:[],
+  return { id:null, pae:"", assunto:"", interessado:S.interessado, orgao:S.orgao, periodo:S.periodo, margem:S.margem||0, data:todayISO(), linhas:[],
            params:{patronal:S.patronal, alimentacao:S.alimentacao, tarifa:S.tarifa, lei:S.lei, cidade:S.cidade, signNome:S.signNome, signCargo:S.signCargo} };
 }
 
@@ -1136,6 +1138,10 @@ function calcular(imp){
   out.aRem = out.rem*out.mult; out.aEnc = out.enc*out.mult;
   out.aAli = out.ali*P; out.aTr = out.M*P;
   out.anual = out.aRem + out.aEnc + out.aAli + out.aTr;
+  // margem de segurança sobre o total (é melhor sobrar do que faltar)
+  out.margemPct = Math.max(0, +(imp.margem||0) || 0);
+  out.mgMensal = out.mensal*out.margemPct/100; out.mgAnual = out.anual*out.margemPct/100;
+  out.mensalC = out.mensal + out.mgMensal; out.anualC = out.anual + out.mgAnual;
   return out;
 }
 
@@ -1146,6 +1152,9 @@ function bindHeader(){
     const el=$(sel); el.value = cur[map[sel]] ?? "";
     el.oninput=()=>{ cur[map[sel]] = map[sel]==="periodo" ? (num(el.value)||"") : el.value; saveDraft(); renderSum(); };
   }
+  // margem de segurança do impacto: ao editar aqui, deixa de seguir a margem padrão das Tabelas
+  const mar=$("#i-mar"); mar.value=fmtPct(cur.margem||0);
+  mar.onchange=()=>{ cur.margem=Math.max(0,num(mar.value)??0); cur.margemMan=true; mar.value=fmtPct(cur.margem); saveDraft(); renderSum(); };
   // PAE: só números; "E-" e a "/" depois do ano (4 dígitos) entram sozinhos
   const pae=$("#i-pae");
   pae.oninput=(e)=>{
@@ -1272,10 +1281,10 @@ function renderSum(){
   renderAviso();
   const [cls,txt]=estadoImpacto(); const st=$("#estado"); if(st){ st.className="chip"+(cls?" "+cls:""); st.textContent=txt; }
   const P=+cur.periodo||12;
-  $("#in-a").textContent=brl(r.anual); $("#in-m").textContent=brl(r.mensal); $("#in-q").textContent=r.qtd; $("#in-e").textContent=brl(r.enc);
-  $("#in-per").textContent = `(${P} meses, 13º e férias)`;
+  $("#in-a").textContent=brl(r.anualC); $("#in-m").textContent=brl(r.mensalC); $("#in-q").textContent=r.qtd; $("#in-e").textContent=brl(r.enc);
+  $("#in-per").textContent = `(${P} meses, 13º e férias${r.margemPct?", com margem de "+fmtPct(r.margemPct):""})`;
   $("#btn-save").disabled = r.qtd===0;
-  $("#sb-q").textContent=r.qtd; $("#sb-m").textContent=brl(r.mensal); $("#sb-a").textContent=brl(r.anual);
+  $("#sb-q").textContent=r.qtd; $("#sb-m").textContent=brl(r.mensalC); $("#sb-a").textContent=brl(r.anualC);
   if(!$("#v-relatorio").classList.contains("hidden")) renderReport();
 }
 
@@ -1433,6 +1442,17 @@ function buildGrid(imp){
   put(x,"D",19,r.enc,sp(K.enc)); put(x,"E",19,r.aEnc, `D${R27}*${MF}`);
   x=row(16.5); put(x,"B",47,"TOTAL"); put(x,"C",47,null); merge("B"+R28,"C"+R28);
   put(x,"D",48,r.mensal,`SUM(D${R24}:D${R27})`); put(x,"E",48,r.anual,`SUM(E${R24}:E${R27})`);
+  if(r.margemPct>0){
+    const mp=PCT(r.margemPct), RM=R28+1, RT=R28+2;
+    x=row(16.5); put(x,"B",45,`MARGEM DE SEGURANÇA (${fmtPct(r.margemPct)})`); put(x,"C",45,null); merge("B"+RM,"C"+RM);
+    put(x,"D",46,r.mgMensal,`D${R28}*${mp}`); put(x,"E",46,r.mgAnual,`E${R28}*${mp}`);
+    x=row(16.5); put(x,"B",47,"TOTAL COM MARGEM"); put(x,"C",47,null); merge("B"+RT,"C"+RT);
+    put(x,"D",48,r.mensalC,`D${R28}+D${RM}`); put(x,"E",48,r.anualC,`E${R28}+E${RM}`);
+    // custo total mensal/anual do quadro da direita passam a ser os valores com margem
+    const cm=rows[R24-1].c, ca=rows[R25-1].c;
+    cm[R2]={...cm[R2], v:"CUSTO MENSAL C/ MARGEM"}; cm[R4]={...cm[R4], v:r.mensalC, f:`D${RT}`};
+    ca[R2]={...ca[R2], v:"CUSTO ANUAL C/ MARGEM"}; ca[R4]={...ca[R4], v:r.anualC, f:`E${RT}`};
+  }
   row(8.25);
   x=row(16.5); put(x,"A",32,`${p.cidade||""}, ${dataExtenso(imp.data)}`); fill(x,"B",LAST,32); merge("A"+x.r,LAST+x.r);
   row(16.5); row(16.5); row(16.5);
@@ -1733,7 +1753,7 @@ function renderList(){
     const nome = esc(i.pae||i.assunto||"sem PAE");
     const serv = r.qtd===1 ? "1 servidor" : r.qtd+" servidores";
     d.innerHTML=`<div class="tt"><b>${esc(i.pae||"(sem PAE)")}</b><span>${esc(i.assunto||"(sem assunto)")}</span></div>
-      <div class="meta" title="${alterado?"Alterado em "+dataHora(i.atualizado):""}"><b>${brl(r.mensal)}/mês</b>${serv}, criado em ${i.criado?dataHora(i.criado):"data não registrada"}</div>
+      <div class="meta" title="${alterado?"Alterado em "+dataHora(i.atualizado):""}"><b>${brl(r.mensalC)}/mês</b>${serv}, criado em ${i.criado?dataHora(i.criado):"data não registrada"}</div>
       <div class="acts">
         <button class="ib sq" data-a="dup" title="Duplicar" aria-label="Duplicar impacto ${nome}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
         <button class="b" data-a="open" aria-label="Abrir impacto ${nome}">Abrir</button>
@@ -1755,8 +1775,8 @@ function setPane(k){ tabPane=k;
   document.querySelectorAll(".pills [role=tab]").forEach(b=>{ const on=b.dataset.p===k; b.setAttribute("aria-selected",on); b.tabIndex=on?0:-1; });
   document.querySelectorAll("#v-tabelas .pane").forEach(p=>{ const on=p.id==="pn-"+k; p.hidden=!on; p.classList.toggle("on",on); }); }
 function renderSettings(){
-  const m={"#s-pat":"patronal","#s-ali":"alimentacao","#s-tar":"tarifa","#s-per":"periodo","#s-lei":"lei","#s-cid":"cidade","#s-sn":"signNome","#s-sc":"signCargo"};
-  const NUM_S=new Set(["patronal","alimentacao","tarifa","periodo"]);
+  const m={"#s-pat":"patronal","#s-ali":"alimentacao","#s-tar":"tarifa","#s-per":"periodo","#s-mar":"margem","#s-lei":"lei","#s-cid":"cidade","#s-sn":"signNome","#s-sc":"signCargo"};
+  const NUM_S=new Set(["patronal","alimentacao","tarifa","periodo","margem"]);
   for(const sel in m){ const el=$(sel), k=m[sel]; el.value= NUM_S.has(k) ? fv(k,S[k]) : S[k];
     el.onchange=()=>{ S[k] = NUM_S.has(k) ? (num(el.value)??0) : el.value; if(NUM_S.has(k)) el.value=fv(k,S[k]); saveSettingsSoon(); syncParamsToDraft(); }; }
   const tb=$("#t-niv tbody"); tb.innerHTML="";
@@ -1801,6 +1821,7 @@ function renderSettings(){
 function refreshDraftFromTables(startup){
   if(cur.congelado){ renderLevels(); renderSum(); return; }   // aberto do Histórico: mantém os valores da época
   cur.params={patronal:S.patronal, alimentacao:S.alimentacao, tarifa:S.tarifa, lei:S.lei, cidade:S.cidade, signNome:S.signNome, signCargo:S.signCargo};
+  if(!cur.margemMan){ cur.margem=S.margem||0; const mi=$("#i-mar"); if(mi) mi.value=fmtPct(cur.margem); }
   cur.linhas.forEach(l=>{ const c=S.cargos.find(c=>sameCargo(l,c)); if(c){ l.nivel=c.nivel; if(!(l.man&&l.man.nome)) l.nome=c.nome; } const base=c?cargoParams(c):S.niveis[l.nivel];
     VAL_KEYS.forEach(k=>{ if(!(l.man&&l.man[k])) l[k]=base[k]??0; }); });
   saveDraft(); renderLevels(); renderSum();
@@ -1830,7 +1851,9 @@ function renderAviso(){
 function syncParamsToDraft(){
   // encargos, alimentação, tarifa, 13º/férias, lei e assinatura: o impacto na tela acompanha na hora
   if(cur.congelado){ renderSum(); return; }
-  cur.params={patronal:S.patronal, alimentacao:S.alimentacao, tarifa:S.tarifa, lei:S.lei, cidade:S.cidade, signNome:S.signNome, signCargo:S.signCargo}; saveDraft(); renderSum();
+  cur.params={patronal:S.patronal, alimentacao:S.alimentacao, tarifa:S.tarifa, lei:S.lei, cidade:S.cidade, signNome:S.signNome, signCargo:S.signCargo};
+  if(!cur.margemMan){ cur.margem=S.margem||0; const mi=$("#i-mar"); if(mi) mi.value=fmtPct(cur.margem); }
+  saveDraft(); renderSum();
 }
 
 /* ================= Navegação / ações ================= */
