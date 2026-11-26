@@ -865,9 +865,9 @@ button.b.lite:hover{background:var(--pri);border-color:var(--pri);color:#fff}
     </div>
     <h3>Cálculo do custo anual</h3>
     <div class="grid">
-      <label class="f">Fator anual<input id="s-fat" type="number" step="0.000001"></label>
+      <label class="f">13º + 1/3 de férias (em 12 meses)<input id="s-fat" inputmode="decimal"></label>
     </div>
-    <p class="hint">Igual à planilha modelo: custo anual = custo mensal × fator; alimentação e transporte × meses; encargos × (meses + 1); remuneração = diferença.</p>
+    <p class="hint">Como na planilha modelo V2: remuneração e encargos × (meses + 1,33); alimentação e transporte × meses. O 1,33 (13º + 1/3 de férias) vale para 12 meses; em períodos menores entra proporcional (6 meses: 1,33 × 6/12).</p>
     <h3>Assinatura</h3>
     <div class="grid">
       <label class="f">Nome<input id="s-sn"></label>
@@ -915,7 +915,7 @@ const MONEY_K = new Set(["venc","abono","transp","alimentacao","tarifa"]);
 const PCT_K = new Set(["ge","grv","gti","patronal"]);
 const fmtPct = v => (Number(v)||0).toLocaleString("pt-BR",{maximumFractionDigits:4})+"%";
 // valor formatado para exibir no campo
-const fv = (k,v) => (v==null||v==="") ? "" : MONEY_K.has(k) ? "R$ "+fmt(v) : PCT_K.has(k) ? fmtPct(v) : String(v);
+const fv = (k,v) => (v==null||v==="") ? "" : k==="adic13" ? (Number(v)||0).toLocaleString("pt-BR",{maximumFractionDigits:4}) : MONEY_K.has(k) ? "R$ "+fmt(v) : PCT_K.has(k) ? fmtPct(v) : String(v);
 const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const esc = s => String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const clone = o => JSON.parse(JSON.stringify(o));
@@ -961,7 +961,7 @@ function defaultSettings(){
     v:3,
     patronal:22, alimentacao:1500, tarifa:4.60, periodo:12,
     lei:"LEI Nº 11.358/2026", cidade:"Belém",
-    metodo:"fator", fator:13.935415,
+    adic13:1.33,
     signNome:"WALDILSON COLINS", signCargo:"Diretor de Gestão de Pessoas",
     interessado:"SEAP", orgao:"SEAP",
     niveis:{
@@ -1014,12 +1014,12 @@ function migrateSettings(s){
     });
     s.v=3;
   }
-  s.metodo="fator";
+  if(s.adic13==null) s.adic13=1.33; delete s.fator; delete s.metodo;
   return s;
 }
 function blankImpacto(){
   return { id:null, pae:"", assunto:"", interessado:S.interessado, orgao:S.orgao, periodo:S.periodo, data:todayISO(), linhas:[],
-           params:{patronal:S.patronal, alimentacao:S.alimentacao, tarifa:S.tarifa, metodo:S.metodo, fator:S.fator, lei:S.lei, cidade:S.cidade, signNome:S.signNome, signCargo:S.signCargo} };
+           params:{patronal:S.patronal, alimentacao:S.alimentacao, tarifa:S.tarifa, adic13:S.adic13, lei:S.lei, cidade:S.cidade, signNome:S.signNome, signCargo:S.signCargo} };
 }
 
 /* ================= Armazenamento (nuvem se disponível, senão local) ================= */
@@ -1117,6 +1117,11 @@ function calcLinha(l, pat){
   const rem=vc+ge+grv+gti+ab, enc=rem*pat/100, tot=rem+enc, q=+l.qtd||0;
   return {vc,ge,grv,gti,ab,rem,enc,tot,custo:tot*q,tr:+l.transp||0,trTot:(+l.transp||0)*q,q};
 }
+// meses + 13º e 1/3 de férias proporcionais: 12 meses → 12 + 1,33 = 13,33; 6 meses → 6 + 1,33 × 6/12 = 6,665
+function adic13(p){ const a=p&&p.adic13; return (a==null||a==="") ? 1.33 : (+a||0); }
+function multMeses(p,P){ return P + adic13(p)*P/12; }
+// o mesmo multiplicador escrito como fórmula do Excel
+function multMesesF(p,P){ const a=(Math.round(adic13(p)*1e6)/1e6).toLocaleString("en-US",{maximumFractionDigits:6,useGrouping:false}); return P===12 ? `(${P}+${a})` : `(${P}+${a}*${P}/12)`; }
 function calcular(imp){
   const p=imp.params, P=+imp.periodo||12;
   const out={niveis:{},qtd:0,rem:0,enc:0,K:0,M:0};
@@ -1130,10 +1135,11 @@ function calcular(imp){
   }
   out.aliUnit=+p.alimentacao||0; out.ali=out.aliUnit*out.qtd;
   out.mensal = out.K + out.M + out.ali;
-  // como na planilha modelo
-  out.anual = out.mensal*(+p.fator||0);
-  out.aAli = out.ali*P; out.aTr = out.M*P; out.aEnc = out.enc*(P+1);
-  out.aRem = out.anual - out.aAli - out.aTr - out.aEnc;
+  // planilha modelo V2: remuneração e encargos × (meses + 13º e 1/3 de férias proporcionais); auxílios × meses
+  out.mult = multMeses(p,P);
+  out.aRem = out.rem*out.mult; out.aEnc = out.enc*out.mult;
+  out.aAli = out.ali*P; out.aTr = out.M*P;
+  out.anual = out.aRem + out.aEnc + out.aAli + out.aTr;
   return out;
 }
 
@@ -1400,9 +1406,9 @@ function buildGrid(imp){
   rows.find(q=>q.r===orgStart).c.A={s:33,v:imp.orgao||"",rot:true}; merge("A"+orgStart,"A"+TG);
 
   // notas + auxílio-alimentação
-  x=row(15); const N1=x.r; put(x,"A",49,"NOTA1: VENCIMENTO ATUALIZADO CONFORME "+(p.lei||"")); put(x,"B",50,null); fill(x,"C",colL(colI(R1)-2),51); put(x,colL(colI(R1)-1),52,null);
+  x=row(15); const N1=x.r; put(x,"A",49,"Nota 1: VENCIMENTO ATUALIZADO CONFORME "+(p.lei||"")); put(x,"B",50,null); fill(x,"C",colL(colI(R1)-2),51); put(x,colL(colI(R1)-1),52,null);
   put(x,R1,53,"AUXÍLIO-ALIMENTAÇÃO"); put(x,R2,54,null); merge(R1+N1,R2+N1); put(x,R3,55,"Valor"); put(x,R4,55,"Total");
-  x=row(15); const N2=x.r; put(x,"A",49,`NOTA2: AUXÍLIO TRANSPORTE COM BASE NO VALOR DA TARIFA DE R$ ${fmt(p.tarifa)}.`); put(x,"B",50,null); put(x,"C",50,null); fill(x,"D",colL(colI(R1)-2),51); put(x,colL(colI(R1)-1),52,null);
+  x=row(15); const N2=x.r; put(x,"A",49,`Nota 2: AUXÍLIO TRANSPORTE COM BASE NO VALOR DA TARIFA DE R$ ${fmt(p.tarifa)}.`); put(x,"B",50,null); put(x,"C",50,null); fill(x,"D",colL(colI(R1)-2),51); put(x,colL(colI(R1)-1),52,null);
   put(x,R1,57,"VALOR"); put(x,R2,58,null); merge(R1+N2,R2+N2); put(x,R3,59,r.aliUnit); put(x,R4,59,r.ali,`${R3}${N2}*C${TG}`);
   x=row(15); const N3=x.r; put(x,"A",24,null); fill(x,"B",R1,24); merge("A"+N3,R1+N3);
   put(x,R2,25,"Total Geral"); put(x,R3,26,null); merge(R2+N3,R3+N3); put(x,R4,16,r.ali,`${R4}${N2}`);
@@ -1415,16 +1421,17 @@ function buildGrid(imp){
   const R24=H+1, R25=H+2, R26=H+3, R27=H+4, R28=H+5;
   x=row(16.5); put(x,"B",45,"Remuneração - 319004"); put(x,"C",45,null); merge("B"+R24,"C"+R24);
   put(x,"D",46,r.rem,sp(K.rem));
-  put(x,"E",46,r.aRem, `${R4}${R25}-SUM(E${R25}:E${R27})`);
+  const MF=multMesesF(p,P);
+  put(x,"E",46,r.aRem, `D${R24}*${MF}`);
   put(x,R2,36,"CUSTO TOTAL MENSAL"); put(x,R3,37,null); merge(R2+R24,R3+R24); put(x,R4,20,r.mensal,`SUM(${K.custo}${TG},${K.trTot}${TG},${R4}${N3})`);
   x=row(16.5); put(x,"B",34,"Auxílio Alimentação - 339046"); put(x,"C",34,null); merge("B"+R25,"C"+R25);
   put(x,"D",19,r.ali,`${R4}${N3}`); put(x,"E",19,r.aAli,`D${R25}*${P}`);
   put(x,R2,38,"CUSTO TOTAL ANUAL"); put(x,R3,39,null); merge(R2+R25,R3+R25);
-  put(x,R4,21,r.anual, `${R4}${R24}*${(+p.fator||0)}`);
+  put(x,R4,21,r.anual, `(${K.custo}${TG}*${MF})+SUM(${K.trTot}${TG},${R4}${N3})*${P}`);
   x=row(16.5); put(x,"B",45,"Auxílio Transporte - 339049"); put(x,"C",45,null); merge("B"+R26,"C"+R26);
   put(x,"D",46,r.M,`${K.trTot}${TG}`); put(x,"E",46,r.aTr,`D${R26}*${P}`);
   x=row(16.5); put(x,"B",34,"Encargos - 339047"); put(x,"C",34,null); merge("B"+R27,"C"+R27);
-  put(x,"D",19,r.enc,sp(K.enc)); put(x,"E",19,r.aEnc, `D${R27}*(${P}+1)`);
+  put(x,"D",19,r.enc,sp(K.enc)); put(x,"E",19,r.aEnc, `D${R27}*${MF}`);
   x=row(16.5); put(x,"B",47,"TOTAL"); put(x,"C",47,null); merge("B"+R28,"C"+R28);
   put(x,"D",48,r.mensal,`SUM(D${R24}:D${R27})`); put(x,"E",48,r.anual,`SUM(E${R24}:E${R27})`);
   row(8.25);
@@ -1749,8 +1756,8 @@ function setPane(k){ tabPane=k;
   document.querySelectorAll(".pills [role=tab]").forEach(b=>{ const on=b.dataset.p===k; b.setAttribute("aria-selected",on); b.tabIndex=on?0:-1; });
   document.querySelectorAll("#v-tabelas .pane").forEach(p=>{ const on=p.id==="pn-"+k; p.hidden=!on; p.classList.toggle("on",on); }); }
 function renderSettings(){
-  const m={"#s-pat":"patronal","#s-ali":"alimentacao","#s-tar":"tarifa","#s-per":"periodo","#s-lei":"lei","#s-cid":"cidade","#s-fat":"fator","#s-sn":"signNome","#s-sc":"signCargo"};
-  const NUM_S=new Set(["patronal","alimentacao","tarifa","periodo","fator"]);
+  const m={"#s-pat":"patronal","#s-ali":"alimentacao","#s-tar":"tarifa","#s-per":"periodo","#s-lei":"lei","#s-cid":"cidade","#s-fat":"adic13","#s-sn":"signNome","#s-sc":"signCargo"};
+  const NUM_S=new Set(["patronal","alimentacao","tarifa","periodo","adic13"]);
   for(const sel in m){ const el=$(sel), k=m[sel]; el.value= NUM_S.has(k) ? fv(k,S[k]) : S[k];
     el.onchange=()=>{ S[k] = NUM_S.has(k) ? (num(el.value)??0) : el.value; if(NUM_S.has(k)) el.value=fv(k,S[k]); saveSettingsSoon(); syncParamsToDraft(); }; }
   const tb=$("#t-niv tbody"); tb.innerHTML="";
@@ -1794,7 +1801,7 @@ function renderSettings(){
 // Ao abrir o app (startup), um impacto já salvo mantém seus valores até a próxima mudança nas tabelas.
 function refreshDraftFromTables(startup){
   if(cur.congelado){ renderLevels(); renderSum(); return; }   // aberto do Histórico: mantém os valores da época
-  cur.params={patronal:S.patronal, alimentacao:S.alimentacao, tarifa:S.tarifa, metodo:S.metodo, fator:S.fator, lei:S.lei, cidade:S.cidade, signNome:S.signNome, signCargo:S.signCargo};
+  cur.params={patronal:S.patronal, alimentacao:S.alimentacao, tarifa:S.tarifa, adic13:S.adic13, lei:S.lei, cidade:S.cidade, signNome:S.signNome, signCargo:S.signCargo};
   cur.linhas.forEach(l=>{ const c=S.cargos.find(c=>sameCargo(l,c)); if(c){ l.nivel=c.nivel; if(!(l.man&&l.man.nome)) l.nome=c.nome; } const base=c?cargoParams(c):S.niveis[l.nivel];
     VAL_KEYS.forEach(k=>{ if(!(l.man&&l.man[k])) l[k]=base[k]??0; }); });
   saveDraft(); renderLevels(); renderSum();
@@ -1808,7 +1815,7 @@ function diffTabelas(imp){
     VAL_KEYS.forEach(k=>{ if(l.man&&l.man[k]) return; const va=+l[k]||0, vb=+base[k]||0;
       if(Math.abs(va-vb)>0.004) add(`${lab[k]} (${c&&c.excecao?l.nome:NIVEL_CURTO[l.nivel]}): ${fv(k,va)} → ${fv(k,vb)}`); }); });
   const P=imp.params||{};
-  [["patronal","% patronal"],["alimentacao","Aux.-alimentação"],["tarifa","Tarifa de transporte"],["fator","Fator anual"]].forEach(([k,nm])=>{
+  [["patronal","% patronal"],["alimentacao","Aux.-alimentação"],["tarifa","Tarifa de transporte"],["adic13","13º + 1/3 de férias"]].forEach(([k,nm])=>{
     if(Math.abs((+P[k]||0)-(+S[k]||0))>1e-9) add(`${nm}: ${fv(k,P[k])} → ${fv(k,S[k])}`); });
   if((P.lei||"")!==(S.lei||"")) add(`Lei: ${P.lei||"-"} → ${S.lei||"-"}`);
   return out;
@@ -1822,9 +1829,9 @@ function renderAviso(){
   $("#btn-upd-old").onclick=()=>{ cur.congelado=false; refreshDraftFromTables(); toast("Valores atualizados. Clique em “Salvar impacto” para guardar no Histórico."); };
 }
 function syncParamsToDraft(){
-  // encargos, alimentação, tarifa, fator, lei e assinatura: o impacto na tela acompanha na hora
+  // encargos, alimentação, tarifa, 13º/férias, lei e assinatura: o impacto na tela acompanha na hora
   if(cur.congelado){ renderSum(); return; }
-  cur.params={patronal:S.patronal, alimentacao:S.alimentacao, tarifa:S.tarifa, metodo:S.metodo, fator:S.fator, lei:S.lei, cidade:S.cidade, signNome:S.signNome, signCargo:S.signCargo}; saveDraft(); renderSum();
+  cur.params={patronal:S.patronal, alimentacao:S.alimentacao, tarifa:S.tarifa, adic13:S.adic13, lei:S.lei, cidade:S.cidade, signNome:S.signNome, signCargo:S.signCargo}; saveDraft(); renderSum();
 }
 
 /* ================= Navegação / ações ================= */
