@@ -925,7 +925,9 @@ const fv = (k,v) => (v==null||v==="") ? "" : MONEY_K.has(k) ? "R$ "+fmt(v) : PCT
 const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const esc = s => String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const clone = o => JSON.parse(JSON.stringify(o));
-const todayISO = () => { const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
+// data de hoje no horário de Brasília (AAAA-MM-DD), qualquer que seja o fuso do computador
+const todayISO = () => { try{ return new Intl.DateTimeFormat("en-CA",{timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date()); }
+  catch(e){ const d=new Date(Date.now()-3*3600e3); return d.toISOString().slice(0,10); } };
 const MESES=["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
 function dataHora(iso){ const d=new Date(iso); if(isNaN(d)) return "-"; return d.toLocaleDateString("pt-BR")+" às "+d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}); }
 function dataExtenso(iso){ if(!iso) return ""; const [y,m,d]=iso.split("-").map(Number); return `${d} de ${MESES[m-1]} de ${y}`; }
@@ -1053,6 +1055,8 @@ async function initStorage(){
   IMP = LS.get("impactos") || {};
   cur = LS.get("draft");
   if(!cur) cur = blankImpacto();
+  // a data do documento abre sempre no dia de hoje (menos em impacto aberto do Histórico, que guarda a data dele)
+  if(!cur.congelado) cur.data = todayISO();
   // Integração SIGP: se o sistema definir window.IMPACTO_API, os dados vão para o servidor
   const API = window.IMPACTO_API;
   if(API){
