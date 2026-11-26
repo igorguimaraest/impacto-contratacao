@@ -583,6 +583,7 @@ button.nm:focus-visible{outline:2px solid var(--pri);outline-offset:4px}
 button.b.lnk{border-color:transparent;background:none}
 button.b.lnk:hover{background:var(--sel)}
 .g-proc{grid-template-columns:1.3fr 1fr 1fr .8fr .8fr 1fr}
+input.inv{border-color:#C0392B!important;box-shadow:0 0 0 3px rgba(192,57,43,.18)!important}
 .sumbar.rs-visivel{opacity:0;pointer-events:none;transform:translate(-50%,12px)}
 .sumbar{transition:opacity .2s,transform .2s}
 @media (min-width:901px){ .sumbar{display:none} main{padding-bottom:40px} }
@@ -764,7 +765,7 @@ button.b.lite:hover{background:var(--pri);border-color:var(--pri);color:#fff}
       <label class="f">PAE<input id="i-pae" placeholder="E-2026/0000000" inputmode="numeric" autocomplete="off" maxlength="21"></label>
       <label class="f">Interessado<input id="i-int"></label>
       <label class="f">Órgão<input id="i-org"></label>
-      <label class="f">Período em meses<input id="i-per" type="number" min="1" max="60" inputmode="numeric"></label>
+      <label class="f">Período em meses<input id="i-per" type="number" min="1" max="60" step="1" inputmode="numeric"></label>
       <label class="f">Margem de segurança (%)<input id="i-mar" inputmode="decimal" placeholder="0%"></label>
       <label class="f">Data do documento<input id="i-data" type="date"></label>
     </div>
@@ -859,7 +860,7 @@ button.b.lite:hover{background:var(--pri);border-color:var(--pri);color:#fff}
     <div class="grid">
       <label class="f">Encargos patronais<input id="s-pat" inputmode="decimal"></label>
       <label class="f">Auxílio-alimentação por servidor<input id="s-ali" inputmode="decimal"></label>
-      <label class="f">Período padrão em meses<input id="s-per" type="number" min="1"></label>
+      <label class="f">Período padrão em meses<input id="s-per" type="number" min="1" max="60" step="1" inputmode="numeric"></label>
       <label class="f">Margem de segurança padrão (%)<input id="s-mar" inputmode="decimal"></label>
       <label class="f">Lei citada na nota 1<input id="s-lei"></label>
       <label class="f">Cidade da assinatura<input id="s-cid"></label>
@@ -911,12 +912,15 @@ const $ = s => document.querySelector(s);
 const fmt = n => (Number(n)||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
 const brl = n => "R$ " + fmt(n);
 // aceita "R$ 1.828,12", "1828,12", "1828.12", "40%"
-const num = v => { if(v===""||v==null) return null; if(typeof v==="number") return v;
+const num = (v, dec) => { if(v===""||v==null) return null; if(typeof v==="number") return v;
   let s=String(v).replace(/R\$|%|\s/gi,"");
   if(s==="") return null;
   if(s.includes(",")) s=s.replace(/\./g,"").replace(",",".");
-  else if(/^-?\d{1,3}(\.\d{3})+$/.test(s)) s=s.replace(/\./g,"");
+  else if(!dec && /^-?\d{1,3}(\.\d{3})+$/.test(s)) s=s.replace(/\./g,"");
   const n=Number(s); return isFinite(n)?n:null; };
+// campos onde "1.500" quer dizer mil e quinhentos; nos demais (%, passagem) o ponto é decimal
+const BIG_K = new Set(["venc","abono","alimentacao"]);
+const numK = (k,v) => num(v, !BIG_K.has(k));
 const MONEY_K = new Set(["venc","abono","transp","alimentacao","tarifa"]);
 const PCT_K = new Set(["ge","grv","gti","gde","patronal","margem","vtDesconto"]);
 const fmtPct = v => (Number(v)||0).toLocaleString("pt-BR",{maximumFractionDigits:4})+"%";
@@ -1028,7 +1032,7 @@ function migrateSettings(s){
     NIVEIS.forEach(nv=>{ if(s.niveis[nv] && s.niveis[nv].gde==null) s.niveis[nv].gde=0; });
     s.cargos.forEach(c=>{ if(c.gde===undefined) c.gde=null; });
     const pp=s.cargos.find(c=>normName(c.nome)===normName("POLICIAL PENAL"));
-    if(pp){ pp.excecao=true; pp.gde=GDE_PP; }
+    if(pp){ pp.excecao=true; pp.gde=GDE_PP; s._avisoGDE=true; }
     s.v=4;
   }
   delete s.adic13; delete s.fator; delete s.metodo;
@@ -1055,8 +1059,8 @@ async function initStorage(){
   IMP = LS.get("impactos") || {};
   cur = LS.get("draft");
   if(!cur) cur = blankImpacto();
-  // a data do documento abre sempre no dia de hoje (menos em impacto aberto do Histórico, que guarda a data dele)
-  if(!cur.congelado) cur.data = todayISO();
+  // a data do documento abre no dia de hoje em impacto ainda não salvo; impacto salvo guarda a data dele
+  if(!cur.congelado && !cur.id) cur.data = todayISO();
   // Integração SIGP: se o sistema definir window.IMPACTO_API, os dados vão para o servidor
   const API = window.IMPACTO_API;
   if(API){
@@ -1146,13 +1150,23 @@ function calcLinha(l, pat){
   const rem=vc+ge+grv+gti+gde+ab, enc=rem*pat/100, tot=rem+enc, q=+l.qtd||0;
   return {vc,ge,grv,gti,gde,ab,rem,enc,tot,custo:tot*q,tr:+l.transp||0,trTot:(+l.transp||0)*q,q};
 }
-// meses + 13º proporcional (meses/12) + 1/3 de férias proporcional (1/3 × meses/12), sem arredondar
+// Regra do custo anual. Impactos salvos guardam nos parâmetros a regra da época:
+//  "fator": custo mensal × fator (planilha modelo antiga, ex.: 13,935415); "v2": meses + 1,33 proporcional (planilha V2);
+//  "exato" (atual): meses + 13º proporcional (meses/12) + 1/3 de férias proporcional (1/3 × meses/12), sem arredondar.
+function regraDe(p){ p=p||{};
+  if(p.metodo==="calc") return "exato";
+  if(p.fator!=null && p.fator!=="") return "fator";
+  if(p.adic13!=null && p.adic13!=="") return "v2";
+  return "exato"; }
 // 12 meses → 12 + 1 + 1/3 = 13,3333…; 6 meses → 6 + 0,5 + 0,1666… = 6,6666…
-function multMeses(p,P){ return P + P/12 + (P/12)/3; }
+function multMeses(p,P){ return regraDe(p)==="v2" ? P + (+p.adic13||0)*P/12 : P + P/12 + (P/12)/3; }
+// período do impacto: inteiro de 1 a 60 (padrão 12)
+function periodoDe(imp){ const v=Math.round(+imp.periodo); return (v>=1 && v<=60) ? v : 12; }
 // o mesmo multiplicador escrito como fórmula do Excel
-function multMesesF(p,P){ return P===12 ? `(12+1+1/3)` : `(${P}+${P}/12+${P}/12/3)`; }
+function multMesesF(p,P){ if(regraDe(p)==="v2"){ const a=(+p.adic13||0).toLocaleString("en-US",{maximumFractionDigits:6,useGrouping:false}); return P===12 ? `(12+${a})` : `(${P}+${a}*${P}/12)`; }
+  return P===12 ? `(12+1+1/3)` : `(${P}+${P}/12+${P}/12/3)`; }
 function calcular(imp){
-  const p=imp.params, P=+imp.periodo||12;
+  const p=imp.params, P=periodoDe(imp);
   const out={niveis:{},qtd:0,rem:0,enc:0,K:0,M:0};
   for(const nv of NIVEIS){
     const ls = imp.linhas.filter(l=>l.nivel===nv && (+l.qtd||0)>0);
@@ -1165,10 +1179,17 @@ function calcular(imp){
   out.aliUnit=+p.alimentacao||0; out.ali=out.aliUnit*out.qtd;
   out.mensal = out.K + out.M + out.ali;
   // planilha modelo V2: remuneração e encargos × (meses + 13º e 1/3 de férias proporcionais); auxílios × meses
-  out.mult = multMeses(p,P);
-  out.aRem = out.rem*out.mult; out.aEnc = out.enc*out.mult;
+  out.regra = regraDe(p);
   out.aAli = out.ali*P; out.aTr = out.M*P;
-  out.anual = out.aRem + out.aEnc + out.aAli + out.aTr;
+  if(out.regra==="fator"){
+    // regra antiga (impacto salvo antes da mudança): total = mensal × fator; remuneração = diferença
+    out.anual = out.mensal*(+p.fator||0); out.aEnc = out.enc*(P+1);
+    out.aRem = out.anual - out.aAli - out.aTr - out.aEnc;
+  } else {
+    out.mult = multMeses(p,P);
+    out.aRem = out.rem*out.mult; out.aEnc = out.enc*out.mult;
+    out.anual = out.aRem + out.aEnc + out.aAli + out.aTr;
+  }
   // margem de segurança sobre o total (é melhor sobrar do que faltar)
   out.margemPct = Math.max(0, +(imp.margem||0) || 0);
   out.mgMensal = out.mensal*out.margemPct/100; out.mgAnual = out.anual*out.margemPct/100;
@@ -1181,11 +1202,19 @@ function bindHeader(){
   const map={"#i-pae":"pae","#i-int":"interessado","#i-org":"orgao","#i-per":"periodo","#i-data":"data","#i-ass":"assunto"};
   for(const sel in map){
     const el=$(sel); el.value = cur[map[sel]] ?? "";
-    el.oninput=()=>{ cur[map[sel]] = map[sel]==="periodo" ? (num(el.value)||"") : el.value; saveDraft(); renderSum(); };
+    if(map[sel]==="periodo"){
+      // período do impacto: número inteiro de 1 a 60 meses; valor inválido fica marcado e não entra no cálculo
+      el.oninput=()=>{ const t=el.value.trim(), v=+t, ok=/^\d+$/.test(t) && v>=1 && v<=60;
+        el.classList.toggle("inv",!ok); el.setAttribute("aria-invalid", ok?"false":"true");
+        if(!ok) return; cur.periodo=v; cur.periodoMan=true; saveDraft(); renderSum(); };
+      el.onchange=()=>{ if(el.classList.contains("inv")) toast("O período deve ser um número inteiro de 1 a 60 meses"); el.value=periodoDe(cur); el.classList.remove("inv"); el.setAttribute("aria-invalid","false"); };
+      continue;
+    }
+    el.oninput=()=>{ cur[map[sel]] = el.value; saveDraft(); renderSum(); };
   }
   // margem de segurança do impacto: ao editar aqui, deixa de seguir a margem padrão das Tabelas
   const mar=$("#i-mar"); mar.value=fmtPct(cur.margem||0);
-  mar.onchange=()=>{ cur.margem=Math.max(0,num(mar.value)??0); cur.margemMan=true; mar.value=fmtPct(cur.margem); saveDraft(); renderSum(); };
+  mar.onchange=()=>{ cur.margem=Math.max(0,num(mar.value,true)??0); cur.margemMan=true; mar.value=fmtPct(cur.margem); saveDraft(); renderSum(); };
   // PAE: só números; "E-" e a "/" depois do ano (4 dígitos) entram sozinhos
   const pae=$("#i-pae");
   pae.oninput=(e)=>{
@@ -1283,7 +1312,7 @@ function renderLevels(){
           <label class="f">Aux. transp.${mk("transp")}<input data-k="transp" inputmode="decimal" value="${fv("transp",l.transp??0)}"></label></div>
           <div class="calc"><span>Remuneração <b>${brl(vals.rem)}</b></span><span>Encargos <b>${brl(vals.enc)}</b></span><span>Total com encargos <b>${brl(vals.tot)}</b></span>
           ${l.man&&Object.keys(l.man).length?` · <button class="b" data-reset style="padding:4px 10px">↺ Voltar aos valores da tabela</button>`:""}${!c?` · <button class="b dan" data-del style="padding:4px 10px">Remover</button>`:""}</div>`;
-        d.querySelectorAll("input").forEach(i=>i.onchange=()=>{ const k=i.dataset.k; if(k==="nome"){ l[k]=i.value.toUpperCase(); (l.man=l.man||{}).nome=true; } else { l[k]=num(i.value)??0; (l.man=l.man||{})[k]=true; } saveDraft(); redesenharMantendoFoco("#levels",()=>{ renderLevels(); renderSum(); }); });
+        d.querySelectorAll("input").forEach(i=>i.onchange=()=>{ const k=i.dataset.k; if(k==="nome"){ l[k]=i.value.toUpperCase(); (l.man=l.man||{}).nome=true; } else { l[k]=numK(k,i.value)??0; (l.man=l.man||{})[k]=true; } saveDraft(); redesenharMantendoFoco("#levels",()=>{ renderLevels(); renderSum(); }); });
         const rs=d.querySelector("[data-reset]"); if(rs) rs.onclick=()=>{ delete l.man; const c2=S.cargos.find(x=>sameCargo(l,x)); const base=c2?cargoParams(c2):nivelParams(l.nivel); VAL_KEYS.forEach(k=>l[k]=base[k]??0); if(c2) l.nome=c2.nome; saveDraft(); renderLevels(); renderSum(); toast("Linha voltou aos valores da tabela"); };
         const del=d.querySelector("[data-del]"); if(del) del.onclick=()=>{ cur.linhas=cur.linhas.filter(x=>x!==l); saveDraft(); renderLevels(); renderSum(); };
         wrap.appendChild(d);
@@ -1382,7 +1411,7 @@ const XL_W = w => Math.round(w*7+5);           // largura Excel → pixels
 
 /* ---------- montagem da grade ---------- */
 function buildGrid(imp){
-  const r=calcular(imp), p=imp.params, P=+imp.periodo||12, pat=(+p.patronal||0)/100;
+  const r=calcular(imp), p=imp.params, P=periodoDe(imp), pat=(+p.patronal||0)/100;
   const G = imp.linhas.some(l=>(+l.qtd||0)>0 && (+l.gti||0)>0);
   const GD = imp.linhas.some(l=>(+l.qtd||0)>0 && (+l.gde||0)>0);
   const keys=["org","cargo","qtd","vc","ge","grv",...(G?["gti"]:[]),...(GD?["gde"]:[]),"ab","rem","enc","tot","custo","tr","trTot"];
@@ -1462,17 +1491,17 @@ function buildGrid(imp){
   const R24=H+1, R25=H+2, R26=H+3, R27=H+4, R28=H+5;
   x=row(16.5); put(x,"B",45,"Remuneração - 319004"); put(x,"C",45,null); merge("B"+R24,"C"+R24);
   put(x,"D",46,r.rem,sp(K.rem));
-  const MF=multMesesF(p,P);
-  put(x,"E",46,r.aRem, `D${R24}*${MF}`);
+  const MF=multMesesF(p,P), FAT=r.regra==="fator";
+  put(x,"E",46,r.aRem, FAT ? `${R4}${R25}-SUM(E${R25}:E${R27})` : `D${R24}*${MF}`);
   put(x,R2,36,"CUSTO TOTAL MENSAL"); put(x,R3,37,null); merge(R2+R24,R3+R24); put(x,R4,20,r.mensal,`SUM(${K.custo}${TG},${K.trTot}${TG},${R4}${N3})`);
   x=row(16.5); put(x,"B",34,"Auxílio Alimentação - 339046"); put(x,"C",34,null); merge("B"+R25,"C"+R25);
   put(x,"D",19,r.ali,`${R4}${N3}`); put(x,"E",19,r.aAli,`D${R25}*${P}`);
   put(x,R2,38,"CUSTO TOTAL ANUAL"); put(x,R3,39,null); merge(R2+R25,R3+R25);
-  put(x,R4,21,r.anual, `(${K.custo}${TG}*${MF})+SUM(${K.trTot}${TG},${R4}${N3})*${P}`);
+  put(x,R4,21,r.anual, FAT ? `${R4}${R24}*${(+p.fator||0)}` : `(${K.custo}${TG}*${MF})+SUM(${K.trTot}${TG},${R4}${N3})*${P}`);
   x=row(16.5); put(x,"B",45,"Auxílio Transporte - 339049"); put(x,"C",45,null); merge("B"+R26,"C"+R26);
   put(x,"D",46,r.M,`${K.trTot}${TG}`); put(x,"E",46,r.aTr,`D${R26}*${P}`);
   x=row(16.5); put(x,"B",34,"Encargos - 339047"); put(x,"C",34,null); merge("B"+R27,"C"+R27);
-  put(x,"D",19,r.enc,sp(K.enc)); put(x,"E",19,r.aEnc, `D${R27}*${MF}`);
+  put(x,"D",19,r.enc,sp(K.enc)); put(x,"E",19,r.aEnc, FAT ? `D${R27}*(${P}+1)` : `D${R27}*${MF}`);
   x=row(16.5); put(x,"B",47,"TOTAL"); put(x,"C",47,null); merge("B"+R28,"C"+R28);
   put(x,"D",48,r.mensal,`SUM(D${R24}:D${R27})`); put(x,"E",48,r.anual,`SUM(E${R24}:E${R27})`);
   if(r.margemPct>0){
@@ -1812,14 +1841,16 @@ function renderSettings(){
   const NUM_S=new Set(["patronal","alimentacao","tarifa","periodo","margem","vtDesconto","vtPassagens","vtDias"]);
   const VT_S=new Set(["tarifa","vtDesconto","vtPassagens","vtDias"]);   // mudam o auxílio-transporte de todos os cargos
   for(const sel in m){ const el=$(sel), k=m[sel]; el.value= NUM_S.has(k) ? fv(k,S[k]) : S[k];
-    el.onchange=()=>{ S[k] = NUM_S.has(k) ? (num(el.value)??0) : el.value; if(NUM_S.has(k)) el.value=fv(k,S[k]); saveSettingsSoon();
+    el.onchange=()=>{
+      if(k==="periodo"){ const t=el.value.trim(), v=+t; if(!(/^\d+$/.test(t) && v>=1 && v<=60)){ toast("O período deve ser um número inteiro de 1 a 60 meses"); el.value=S.periodo; return; } }
+      S[k] = NUM_S.has(k) ? (numK(k,el.value)??0) : el.value; if(NUM_S.has(k)) el.value=fv(k,S[k]); saveSettingsSoon();
       if(VT_S.has(k)) redesenharMantendoFoco("#v-tabelas",()=>{ renderSettings(); refreshDraftFromTables(); }); else syncParamsToDraft(); }; }
   { const vh=$("#vt-hint"); if(vh) vh.innerHTML = "Regra da SEPLAD: (passagens por dia × dias úteis × valor da passagem) − desconto sobre o vencimento base. Se der negativo, o auxílio fica zero.<br>Hoje: " +
       NIVEIS.map(nv=>`${NIVEL_NOME[nv]} ${brl(calcTransp(S.niveis[nv].venc))}`).join("; ") + "."; }
   const tb=$("#t-niv tbody"); tb.innerHTML="";
   NIVEIS.forEach(nv=>{ const n=S.niveis[nv]; const tr=document.createElement("tr");
     tr.innerHTML=`<td style="white-space:nowrap"><b>${NIVEL_NOME[nv]}</b></td>`+VAL_KEYS.map(k=> k==="transp" ? `<td style="min-width:90px;white-space:nowrap" title="Calculado pela regra da SEPLAD (Encargos e assinatura → Auxílio-transporte)">${brl(calcTransp(n.venc))}</td>` : `<td style="min-width:90px"><input data-k="${k}" inputmode="decimal" value="${fv(k,n[k]??0)}"></td>`).join("");
-    tr.querySelectorAll("input").forEach(i=>i.onchange=()=>{ n[i.dataset.k]=num(i.value)??0; saveSettingsSoon(); redesenharMantendoFoco("#v-tabelas",()=>{ renderSettings(); refreshDraftFromTables(); }); toast("Tabela atualizada"); });
+    tr.querySelectorAll("input").forEach(i=>i.onchange=()=>{ n[i.dataset.k]=numK(i.dataset.k,i.value)??0; saveSettingsSoon(); redesenharMantendoFoco("#v-tabelas",()=>{ renderSettings(); refreshDraftFromTables(); }); toast("Tabela atualizada"); });
     tb.appendChild(tr); });
   // exceções
   const te=$("#t-exc tbody"); te.innerHTML="";
@@ -1827,7 +1858,7 @@ function renderSettings(){
   if(!exc.length) te.innerHTML=`<tr><td colspan="8" class="hint">Nenhuma exceção. Marque “Exceção” em um cargo abaixo.</td></tr>`;
   exc.forEach(c=>{ const tr=document.createElement("tr"); const n=S.niveis[c.nivel];
     tr.innerHTML=`<td style="min-width:200px"><b>${esc(c.nome)}</b><br><small class="hint">${NIVEL_NOME[c.nivel]}</small></td>`+VAL_KEYS.map(k=> k==="transp" ? `<td style="min-width:90px;white-space:nowrap" title="Calculado pela regra da SEPLAD">${brl(cargoParams(c).transp)}</td>` : `<td style="min-width:90px"><input data-k="${k}" inputmode="decimal" placeholder="${fv(k,n[k]??0)}" value="${fv(k,c[k])}"></td>`).join("");
-    tr.querySelectorAll("input").forEach(i=>i.onchange=()=>{ c[i.dataset.k]=num(i.value); i.value=fv(i.dataset.k,c[i.dataset.k]); saveSettingsSoon(); redesenharMantendoFoco("#v-tabelas",()=>{ renderSettings(); refreshDraftFromTables(); }); toast("Exceção atualizada"); });
+    tr.querySelectorAll("input").forEach(i=>i.onchange=()=>{ c[i.dataset.k]=numK(i.dataset.k,i.value); i.value=fv(i.dataset.k,c[i.dataset.k]); saveSettingsSoon(); redesenharMantendoFoco("#v-tabelas",()=>{ renderSettings(); refreshDraftFromTables(); }); toast("Exceção atualizada"); });
     te.appendChild(tr); });
   // lista de cargos (nome + nível)
   $("#pl-cg-n").textContent=S.cargos.length; $("#pl-exc-n").textContent=S.cargos.filter(c=>c.excecao).length;
@@ -1858,7 +1889,8 @@ function renderSettings(){
 function refreshDraftFromTables(startup){
   if(cur.congelado){ renderLevels(); renderSum(); return; }   // aberto do Histórico: mantém os valores da época
   cur.params={patronal:S.patronal, alimentacao:S.alimentacao, tarifa:S.tarifa, lei:S.lei, cidade:S.cidade, signNome:S.signNome, signCargo:S.signCargo};
-  if(!cur.margemMan){ cur.margem=S.margem||0; const mi=$("#i-mar"); if(mi) mi.value=fmtPct(cur.margem); }
+  if(!cur.id && !cur.margemMan){ cur.margem=S.margem||0; const mi=$("#i-mar"); if(mi) mi.value=fmtPct(cur.margem); }
+  if(!cur.id && !cur.periodoMan){ cur.periodo=S.periodo||12; const pi=$("#i-per"); if(pi) pi.value=cur.periodo; }
   cur.linhas.forEach(l=>{ const c=S.cargos.find(c=>sameCargo(l,c)); if(c){ l.nivel=c.nivel; if(!(l.man&&l.man.nome)) l.nome=c.nome; } const base=c?cargoParams(c):nivelParams(l.nivel);
     VAL_KEYS.forEach(k=>{ if(!(l.man&&l.man[k])) l[k]=base[k]??0; }); });
   saveDraft(); renderLevels(); renderSum();
@@ -1875,6 +1907,7 @@ function diffTabelas(imp){
   [["patronal","% patronal"],["alimentacao","Aux.-alimentação"],["tarifa","Tarifa de transporte"]].forEach(([k,nm])=>{
     if(Math.abs((+P[k]||0)-(+S[k]||0))>1e-9) add(`${nm}: ${fv(k,P[k])} → ${fv(k,S[k])}`); });
   if((P.lei||"")!==(S.lei||"")) add(`Lei: ${P.lei||"-"} → ${S.lei||"-"}`);
+  const rg=regraDe(P); if(rg!=="exato") add(rg==="fator" ? `Custo anual pelo fator ${String(P.fator).replace(".",",")} (regra antiga)` : "Custo anual com 13º e férias de 1,33 (planilha V2)");
   return out;
 }
 function renderAviso(){
@@ -1889,7 +1922,8 @@ function syncParamsToDraft(){
   // encargos, alimentação, tarifa, 13º/férias, lei e assinatura: o impacto na tela acompanha na hora
   if(cur.congelado){ renderSum(); return; }
   cur.params={patronal:S.patronal, alimentacao:S.alimentacao, tarifa:S.tarifa, lei:S.lei, cidade:S.cidade, signNome:S.signNome, signCargo:S.signCargo};
-  if(!cur.margemMan){ cur.margem=S.margem||0; const mi=$("#i-mar"); if(mi) mi.value=fmtPct(cur.margem); }
+  if(!cur.id && !cur.margemMan){ cur.margem=S.margem||0; const mi=$("#i-mar"); if(mi) mi.value=fmtPct(cur.margem); }
+  if(!cur.id && !cur.periodoMan){ cur.periodo=S.periodo||12; const pi=$("#i-per"); if(pi) pi.value=cur.periodo; }
   saveDraft(); renderSum();
 }
 
@@ -1999,7 +2033,9 @@ $("#imp").onchange=async e=>{
 
 // ao entrar num campo de valor, seleciona tudo para facilitar a digitação
 document.addEventListener("focusin",e=>{ const t=e.target; if(t.matches && t.matches('input[inputmode="decimal"]')) setTimeout(()=>{ try{t.select();}catch(_){} },0); });
-(async()=>{ await initStorage(); renderAll(); refreshDraftFromTables(true); })();
+(async()=>{ await initStorage(); renderAll(); refreshDraftFromTables(true);
+  if(S._avisoGDE){ delete S._avisoGDE; saveSettings();
+    ask("Nova gratificação: GDE", "<p>O <b>Policial Penal</b> passou a ter a <b>GDE (Gratificação de Dedicação Exclusiva) de 70%</b> do vencimento base, que entra na remuneração, nos encargos, no 13º e nas férias.</p><p class='hint'>Enquanto a lei não estiver valendo, coloque <b>0%</b> em Tabelas e encargos → Exceções → GDE %.</p>", "Entendi"); } })();
 </script>
 </body>
 </html>
