@@ -839,14 +839,14 @@ button.b.lite:hover{background:var(--pri);border-color:var(--pri);color:#fff}
       <div class="phead"><div><h2 class="ptitle">Salários por nível</h2><p class="psub">Todos os cargos de um nível usam estes valores. Atualize aqui a cada reajuste.</p></div></div>
     
     <div style="overflow-x:auto">
-    <table class="t" id="t-niv"><thead><tr><th>Nível</th><th>Vencimento R$</th><th>G.E. %</th><th>GRV %</th><th>GTI %</th><th>Abono R$</th><th>Aux. transp. R$</th></tr></thead><tbody></tbody></table>
+    <table class="t" id="t-niv"><thead><tr><th>Nível</th><th>Vencimento R$</th><th>G.E. %</th><th>GRV %</th><th>GTI %</th><th>Abono R$</th><th>Aux. transp. (calculado)</th></tr></thead><tbody></tbody></table>
     </div>
     </div>
     <div class="pane" id="pn-exc" role="tabpanel" aria-labelledby="pl-exc" hidden>
       <div class="phead"><div><h2 class="ptitle">Exceções</h2><p class="psub">Cargos com valores próprios, como Policial Penal e Agente Penitenciário (GTI de 70% e abono de R$ 280). Campos em branco seguem o nível, com o valor mostrado em cinza.</p></div></div>
     
     <div style="overflow-x:auto">
-    <table class="t" id="t-exc"><thead><tr><th>Cargo</th><th>Vencimento R$</th><th>G.E. %</th><th>GRV %</th><th>GTI %</th><th>Abono R$</th><th>Aux. transp. R$</th></tr></thead><tbody></tbody></table>
+    <table class="t" id="t-exc"><thead><tr><th>Cargo</th><th>Vencimento R$</th><th>G.E. %</th><th>GRV %</th><th>GTI %</th><th>Abono R$</th><th>Aux. transp. (calculado)</th></tr></thead><tbody></tbody></table>
     </div>
     </div>
     <div class="pane" id="pn-cg" role="tabpanel" aria-labelledby="pl-cg" hidden>
@@ -859,12 +859,19 @@ button.b.lite:hover{background:var(--pri);border-color:var(--pri);color:#fff}
     <div class="grid">
       <label class="f">Encargos patronais<input id="s-pat" inputmode="decimal"></label>
       <label class="f">Auxílio-alimentação por servidor<input id="s-ali" inputmode="decimal"></label>
-      <label class="f">Tarifa de transporte<input id="s-tar" inputmode="decimal"></label>
       <label class="f">Período padrão em meses<input id="s-per" type="number" min="1"></label>
       <label class="f">Margem de segurança padrão (%)<input id="s-mar" inputmode="decimal"></label>
       <label class="f">Lei citada na nota 1<input id="s-lei"></label>
       <label class="f">Cidade da assinatura<input id="s-cid"></label>
     </div>
+    <h3>Auxílio-transporte</h3>
+    <div class="grid">
+      <label class="f">Valor da passagem<input id="s-tar" inputmode="decimal"></label>
+      <label class="f">Desconto sobre o vencimento (%)<input id="s-vtdc" inputmode="decimal"></label>
+      <label class="f">Passagens por dia<input id="s-vtp" type="number" min="0" inputmode="numeric"></label>
+      <label class="f">Dias úteis no mês<input id="s-vtd" type="number" min="0" inputmode="numeric"></label>
+    </div>
+    <p class="hint" id="vt-hint">Regra da SEPLAD: (passagens por dia × dias úteis × valor da passagem) − desconto sobre o vencimento base. Se der negativo, o auxílio fica zero.</p>
     <h3>Cálculo do custo anual</h3>
     <p class="hint">Automático pelo período de cada impacto. Remuneração e encargos × (meses + 13º proporcional + 1/3 de férias proporcional); alimentação e transporte × meses.<br>12 meses: 12 + 12/12 + 1/3 × 12/12 = 13,3333…; 6 meses: 6 + 6/12 + 1/3 × 6/12 = 6,6666…</p>
     <h3>Assinatura</h3>
@@ -911,7 +918,7 @@ const num = v => { if(v===""||v==null) return null; if(typeof v==="number") retu
   else if(/^-?\d{1,3}(\.\d{3})+$/.test(s)) s=s.replace(/\./g,"");
   const n=Number(s); return isFinite(n)?n:null; };
 const MONEY_K = new Set(["venc","abono","transp","alimentacao","tarifa"]);
-const PCT_K = new Set(["ge","grv","gti","patronal","margem"]);
+const PCT_K = new Set(["ge","grv","gti","patronal","margem","vtDesconto"]);
 const fmtPct = v => (Number(v)||0).toLocaleString("pt-BR",{maximumFractionDigits:4})+"%";
 // valor formatado para exibir no campo
 const fv = (k,v) => (v==null||v==="") ? "" : MONEY_K.has(k) ? "R$ "+fmt(v) : PCT_K.has(k) ? fmtPct(v) : String(v);
@@ -958,7 +965,7 @@ const GTI_EXC = {venc:null, ge:null, grv:null, gti:70, abono:280, transp:null};
 function defaultSettings(){
   return {
     v:3,
-    patronal:22, alimentacao:1500, tarifa:4.60, periodo:12, margem:0,
+    patronal:22, alimentacao:1500, tarifa:4.60, vtPassagens:2, vtDias:22, vtDesconto:6, periodo:12, margem:0,
     lei:"LEI Nº 11.358/2026", cidade:"Belém",
     signNome:"WALDILSON COLINS", signCargo:"Diretor de Gestão de Pessoas",
     interessado:"SEAP", orgao:"SEAP",
@@ -1104,12 +1111,22 @@ window.addEventListener("storage",e=>{
 });
 
 /* ================= Cálculo ================= */
+// auxílio-transporte (regra da SEPLAD): passagens por dia × dias úteis × tarifa − desconto % sobre o vencimento base; nunca negativo
+function calcTransp(venc){
+  const bruto = (+S.vtPassagens||0) * (+S.vtDias||0) * (+S.tarifa||0);
+  const v = bruto - (+venc||0) * (+S.vtDesconto||0) / 100;
+  return Math.max(0, Math.round(v*100)/100);
+}
 function cargoParams(c){
   const n = S.niveis[c.nivel];
   // valores do nível; só cargos marcados como exceção usam valores próprios
   const pick=(k)=> (!c.excecao || c[k]==null || c[k]==="") ? (n[k]??0) : Number(c[k]);
-  const o={}; VAL_KEYS.forEach(k=>o[k]=pick(k)); return o;
+  const o={}; VAL_KEYS.forEach(k=>o[k]=pick(k));
+  o.transp = calcTransp(o.venc);   // sempre calculado pelo vencimento do cargo
+  return o;
 }
+// valores de um nível (para linhas sem cargo da tabela)
+function nivelParams(nv){ const n=S.niveis[nv]||{}; return {...n, transp:calcTransp(n.venc)}; }
 function calcLinha(l, pat){
   const vc=+l.venc||0, ge=vc*(+l.ge||0)/100, grv=vc*(+l.grv||0)/100, gti=vc*(+l.gti||0)/100, ab=+l.abono||0;
   const rem=vc+ge+grv+gti+ab, enc=rem*pat/100, tot=rem+enc, q=+l.qtd||0;
@@ -1252,7 +1269,7 @@ function renderLevels(){
           <div class="calc"><span>Remuneração <b>${brl(vals.rem)}</b></span><span>Encargos <b>${brl(vals.enc)}</b></span><span>Total com encargos <b>${brl(vals.tot)}</b></span>
           ${l.man&&Object.keys(l.man).length?` · <button class="b" data-reset style="padding:4px 10px">↺ Voltar aos valores da tabela</button>`:""}${!c?` · <button class="b dan" data-del style="padding:4px 10px">Remover</button>`:""}</div>`;
         d.querySelectorAll("input").forEach(i=>i.onchange=()=>{ const k=i.dataset.k; if(k==="nome"){ l[k]=i.value.toUpperCase(); (l.man=l.man||{}).nome=true; } else { l[k]=num(i.value)??0; (l.man=l.man||{})[k]=true; } saveDraft(); redesenharMantendoFoco("#levels",()=>{ renderLevels(); renderSum(); }); });
-        const rs=d.querySelector("[data-reset]"); if(rs) rs.onclick=()=>{ delete l.man; const c2=S.cargos.find(x=>sameCargo(l,x)); const base=c2?cargoParams(c2):S.niveis[l.nivel]; VAL_KEYS.forEach(k=>l[k]=base[k]??0); if(c2) l.nome=c2.nome; saveDraft(); renderLevels(); renderSum(); toast("Linha voltou aos valores da tabela"); };
+        const rs=d.querySelector("[data-reset]"); if(rs) rs.onclick=()=>{ delete l.man; const c2=S.cargos.find(x=>sameCargo(l,x)); const base=c2?cargoParams(c2):nivelParams(l.nivel); VAL_KEYS.forEach(k=>l[k]=base[k]??0); if(c2) l.nome=c2.nome; saveDraft(); renderLevels(); renderSum(); toast("Linha voltou aos valores da tabela"); };
         const del=d.querySelector("[data-del]"); if(del) del.onclick=()=>{ cur.linhas=cur.linhas.filter(x=>x!==l); saveDraft(); renderLevels(); renderSum(); };
         wrap.appendChild(d);
       }
@@ -1775,13 +1792,17 @@ function setPane(k){ tabPane=k;
   document.querySelectorAll(".pills [role=tab]").forEach(b=>{ const on=b.dataset.p===k; b.setAttribute("aria-selected",on); b.tabIndex=on?0:-1; });
   document.querySelectorAll("#v-tabelas .pane").forEach(p=>{ const on=p.id==="pn-"+k; p.hidden=!on; p.classList.toggle("on",on); }); }
 function renderSettings(){
-  const m={"#s-pat":"patronal","#s-ali":"alimentacao","#s-tar":"tarifa","#s-per":"periodo","#s-mar":"margem","#s-lei":"lei","#s-cid":"cidade","#s-sn":"signNome","#s-sc":"signCargo"};
-  const NUM_S=new Set(["patronal","alimentacao","tarifa","periodo","margem"]);
+  const m={"#s-pat":"patronal","#s-ali":"alimentacao","#s-tar":"tarifa","#s-vtdc":"vtDesconto","#s-vtp":"vtPassagens","#s-vtd":"vtDias","#s-per":"periodo","#s-mar":"margem","#s-lei":"lei","#s-cid":"cidade","#s-sn":"signNome","#s-sc":"signCargo"};
+  const NUM_S=new Set(["patronal","alimentacao","tarifa","periodo","margem","vtDesconto","vtPassagens","vtDias"]);
+  const VT_S=new Set(["tarifa","vtDesconto","vtPassagens","vtDias"]);   // mudam o auxílio-transporte de todos os cargos
   for(const sel in m){ const el=$(sel), k=m[sel]; el.value= NUM_S.has(k) ? fv(k,S[k]) : S[k];
-    el.onchange=()=>{ S[k] = NUM_S.has(k) ? (num(el.value)??0) : el.value; if(NUM_S.has(k)) el.value=fv(k,S[k]); saveSettingsSoon(); syncParamsToDraft(); }; }
+    el.onchange=()=>{ S[k] = NUM_S.has(k) ? (num(el.value)??0) : el.value; if(NUM_S.has(k)) el.value=fv(k,S[k]); saveSettingsSoon();
+      if(VT_S.has(k)) redesenharMantendoFoco("#v-tabelas",()=>{ renderSettings(); refreshDraftFromTables(); }); else syncParamsToDraft(); }; }
+  { const vh=$("#vt-hint"); if(vh) vh.innerHTML = "Regra da SEPLAD: (passagens por dia × dias úteis × valor da passagem) − desconto sobre o vencimento base. Se der negativo, o auxílio fica zero.<br>Hoje: " +
+      NIVEIS.map(nv=>`${NIVEL_NOME[nv]} ${brl(calcTransp(S.niveis[nv].venc))}`).join("; ") + "."; }
   const tb=$("#t-niv tbody"); tb.innerHTML="";
   NIVEIS.forEach(nv=>{ const n=S.niveis[nv]; const tr=document.createElement("tr");
-    tr.innerHTML=`<td style="white-space:nowrap"><b>${NIVEL_NOME[nv]}</b></td>`+VAL_KEYS.map(k=>`<td style="min-width:90px"><input data-k="${k}" inputmode="decimal" value="${fv(k,n[k]??0)}"></td>`).join("");
+    tr.innerHTML=`<td style="white-space:nowrap"><b>${NIVEL_NOME[nv]}</b></td>`+VAL_KEYS.map(k=> k==="transp" ? `<td style="min-width:90px;white-space:nowrap" title="Calculado pela regra da SEPLAD (Encargos e assinatura → Auxílio-transporte)">${brl(calcTransp(n.venc))}</td>` : `<td style="min-width:90px"><input data-k="${k}" inputmode="decimal" value="${fv(k,n[k]??0)}"></td>`).join("");
     tr.querySelectorAll("input").forEach(i=>i.onchange=()=>{ n[i.dataset.k]=num(i.value)??0; saveSettingsSoon(); redesenharMantendoFoco("#v-tabelas",()=>{ renderSettings(); refreshDraftFromTables(); }); toast("Tabela atualizada"); });
     tb.appendChild(tr); });
   // exceções
@@ -1789,8 +1810,8 @@ function renderSettings(){
   const exc=S.cargos.filter(c=>c.excecao);
   if(!exc.length) te.innerHTML=`<tr><td colspan="7" class="hint">Nenhuma exceção. Marque “Exceção” em um cargo abaixo.</td></tr>`;
   exc.forEach(c=>{ const tr=document.createElement("tr"); const n=S.niveis[c.nivel];
-    tr.innerHTML=`<td style="min-width:200px"><b>${esc(c.nome)}</b><br><small class="hint">${NIVEL_NOME[c.nivel]}</small></td>`+VAL_KEYS.map(k=>`<td style="min-width:90px"><input data-k="${k}" inputmode="decimal" placeholder="${fv(k,n[k]??0)}" value="${fv(k,c[k])}"></td>`).join("");
-    tr.querySelectorAll("input").forEach(i=>i.onchange=()=>{ c[i.dataset.k]=num(i.value); i.value=fv(i.dataset.k,c[i.dataset.k]); saveSettingsSoon(); refreshDraftFromTables(); toast("Exceção atualizada"); });
+    tr.innerHTML=`<td style="min-width:200px"><b>${esc(c.nome)}</b><br><small class="hint">${NIVEL_NOME[c.nivel]}</small></td>`+VAL_KEYS.map(k=> k==="transp" ? `<td style="min-width:90px;white-space:nowrap" title="Calculado pela regra da SEPLAD">${brl(cargoParams(c).transp)}</td>` : `<td style="min-width:90px"><input data-k="${k}" inputmode="decimal" placeholder="${fv(k,n[k]??0)}" value="${fv(k,c[k])}"></td>`).join("");
+    tr.querySelectorAll("input").forEach(i=>i.onchange=()=>{ c[i.dataset.k]=num(i.value); i.value=fv(i.dataset.k,c[i.dataset.k]); saveSettingsSoon(); redesenharMantendoFoco("#v-tabelas",()=>{ renderSettings(); refreshDraftFromTables(); }); toast("Exceção atualizada"); });
     te.appendChild(tr); });
   // lista de cargos (nome + nível)
   $("#pl-cg-n").textContent=S.cargos.length; $("#pl-exc-n").textContent=S.cargos.filter(c=>c.excecao).length;
@@ -1822,7 +1843,7 @@ function refreshDraftFromTables(startup){
   if(cur.congelado){ renderLevels(); renderSum(); return; }   // aberto do Histórico: mantém os valores da época
   cur.params={patronal:S.patronal, alimentacao:S.alimentacao, tarifa:S.tarifa, lei:S.lei, cidade:S.cidade, signNome:S.signNome, signCargo:S.signCargo};
   if(!cur.margemMan){ cur.margem=S.margem||0; const mi=$("#i-mar"); if(mi) mi.value=fmtPct(cur.margem); }
-  cur.linhas.forEach(l=>{ const c=S.cargos.find(c=>sameCargo(l,c)); if(c){ l.nivel=c.nivel; if(!(l.man&&l.man.nome)) l.nome=c.nome; } const base=c?cargoParams(c):S.niveis[l.nivel];
+  cur.linhas.forEach(l=>{ const c=S.cargos.find(c=>sameCargo(l,c)); if(c){ l.nivel=c.nivel; if(!(l.man&&l.man.nome)) l.nome=c.nome; } const base=c?cargoParams(c):nivelParams(l.nivel);
     VAL_KEYS.forEach(k=>{ if(!(l.man&&l.man[k])) l[k]=base[k]??0; }); });
   saveDraft(); renderLevels(); renderSum();
 }
@@ -1831,7 +1852,7 @@ function diffTabelas(imp){
   const out=[], add=s=>{ if(!out.includes(s)) out.push(s); };
   const lab={venc:"Vencimento",ge:"G.E.",grv:"GRV",gti:"GTI",abono:"Abono",transp:"Aux. transp."};
   (imp.linhas||[]).filter(l=>(+l.qtd||0)>0).forEach(l=>{
-    const c=S.cargos.find(c=>sameCargo(l,c)); const base=c?cargoParams(c):S.niveis[l.nivel];
+    const c=S.cargos.find(c=>sameCargo(l,c)); const base=c?cargoParams(c):nivelParams(l.nivel);
     VAL_KEYS.forEach(k=>{ if(l.man&&l.man[k]) return; const va=+l[k]||0, vb=+base[k]||0;
       if(Math.abs(va-vb)>0.004) add(`${lab[k]} (${c&&c.excecao?l.nome:NIVEL_CURTO[l.nivel]}): ${fv(k,va)} → ${fv(k,vb)}`); }); });
   const P=imp.params||{};
